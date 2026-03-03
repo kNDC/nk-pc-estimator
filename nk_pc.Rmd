@@ -71,7 +71,7 @@ pc.data <- read.csv("nk_pc.csv", sep = ';');
 ```{r}
 #---Add relevant fluctuation components---
 pc.data$output.gap <- log(pc.data$output) - hp1(log(pc.data$output), lambda = 1600L);
-pc.data$MC <- log(pc.data$lab.share / hp1(pc.data$lab.share, lambda = 8000L));
+pc.data$MC <- log(pc.data$lab.share / hp1(pc.data$lab.share, lambda = 1600L));
 if (use.CPI) {
   colnames(pc.data)[colnames(pc.data) %in% "inflation_CPI"] <- "inflation";
   colnames(pc.data)[colnames(pc.data) %in% "inflation_D"] <- "inflation.other";
@@ -133,10 +133,10 @@ for (i in leads) {
                         shift(pc.data$inflation, i), use = "complete.obs"));
 }
 
-barplot(acf.inflation, main = "Correlation Structure\r\nInflation (t), Inflation (t+lead)");
-barplot(cor.table[, 1], main = "Correlation Structure\r\nOutput gap (t), Inflation (t+lead)");
-barplot(cor.table[, 2], main = "Correlation Structure\r\nOutput gap (t), MC (t+lead)");
-barplot(cor.table[, 3], main = "Correlation Structure\r\nMC (t), Inflation (t+lead)");
+barplot(acf.inflation, main = "Autocorrelation Structure\r\nInflation (t), Inflation (t+lead)");
+barplot(cor.table[, 1], main = "Cross-Correlation Structure\r\nOutput gap (t), Inflation (t+lead)");
+barplot(cor.table[, 2], main = "Cross-Correlation Structure\r\nOutput gap (t), MC (t+lead)");
+barplot(cor.table[, 3], main = "Cross-Correlation Structure\r\nMC (t), Inflation (t+lead)");
 
 ```
 ```{r}
@@ -160,10 +160,6 @@ g.data <- cbind(g.data, pc.data$lab.share);
 g.data <- cbind(g.data, pc.data$output.gap);
 
 g.data <- cbind(g.data, pc.data$inflation.other);
-# g.data <- cbind(g.data, shift(pc.data$inflation.other, -1));
-# g.data <- cbind(g.data, shift(pc.data$inflation.other, -2));
-# g.data <- cbind(g.data, shift(pc.data$inflation.other, -3));
-# g.data <- cbind(g.data, shift(pc.data$inflation.other, -4));
 
 # Instrument count
 instr.count <- ncol(g.data) - 3; # first 3 vars are in the NK PC equation
@@ -197,9 +193,6 @@ confint(pc.model);
 
 pc.model$coefficients[1];
 pc.model$coefficients[2];
-
-# t-stats
-# pc.model$coefficients / sqrt(diag(vcov(pc.model)));
 
 ```
 ```{r}
