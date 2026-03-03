@@ -1,0 +1,217 @@
+---
+title: "GMM estimation of the New Keynesian Phillips curve"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+#--- Initialisation ---
+setwd(shell("cd", intern = T)); getwd();
+rm(list = ls()); gc();
+getwd();
+
+```
+```{r}
+#--- Auxiliary functions ---
+#--- Lead/Lag operator ---
+shift <- function(x, n_periods) {
+  if (n_periods == 0) return(x);
+  
+  if (n_periods > 0) {
+    out <- c(x[(n_periods + 1):length(x)], rep(NA, n_periods));
+    return(out);
+  }
+  
+  if (n_periods < 0) {
+    out <- c(rep(NA, -n_periods), x[1:(length(x) + n_periods)]);
+    return(out);
+  }
+}
+
+#--- One-sided Hodrick-Prescott filter ---
+hp1 <- function(x, lambda = 1600L) {
+  dx.init <- x[2] - x[1];
+  
+  return (sapply(1:length(x), 
+                 function(t) {
+                   return (hp2(c(x[1] - 2*dx.init, 
+                                 x[1] - dx.init, 
+                                 x[1:t]), lambda)[t]);
+                   }));
+}
+
+#--- Two-sided Hodrick-Prescott filter ---
+hp2 <- function(x, lambda = 1600L) {
+  m <- length(x);
+  E <- diag(nrow = m, ncol = m);
+  
+  D <- cbind(0L, diag(nrow = m - 2L, ncol = m - 2L)) - 
+    cbind(diag(nrow = m - 2L, ncol = m - 2L), 0L);
+  D <- cbind(0L, D) - cbind(D, 0L);
+  
+  return(solve(E + lambda * t(D) %*% D, x));
+}
+
+```
+```{r}
+#---Settings---
+# Use CPI inflation instead of 
+# the deflator-based version
+use.CPI <- F;
+
+```
+```{r}
+#---Read data---
+pc.data <- read.csv("nk_pc.csv", sep = ';');
+
+```
+```{r}
+#---Add relevant fluctuation components---
+pc.data$output.gap <- log(pc.data$output) - hp1(log(pc.data$output), lambda = 1600L);
+pc.data$MC <- log(pc.data$lab.share / hp1(pc.data$lab.share, lambda = 8000L));
+if (use.CPI) {
+  colnames(pc.data)[colnames(pc.data) %in% "inflation_CPI"] <- "inflation";
+  colnames(pc.data)[colnames(pc.data) %in% "inflation_D"] <- "inflation.other";
+} else {
+  colnames(pc.data)[colnames(pc.data) %in% "inflation_D"] <- "inflation";
+  colnames(pc.data)[colnames(pc.data) %in% "inflation_CPI"] <- "inflation.other";
+}
+
+```
+```{r}
+#---Correlation/autocorrelation analysis---
+leads <- -15:15;
+cor.table <- matrix(data = NA, nrow = length(leads), ncol = ncol(pc.data) - 1, 
+                    dimnames = list(leads));
+
+{
+  cor.column <- NULL;
+  
+  for (i in leads) {
+    cor.column = c(cor.column, 
+                   cor(pc.data$output.gap, 
+                       shift(pc.data$inflation, i), 
+                       use = "complete.obs"));
+  }
+  
+  cor.table[, 1] <- cor.column;
+}
+
+{
+  cor.column <- NULL;
+  
+  for (i in leads) {
+    cor.column = c(cor.column, 
+                   cor(pc.data$output.gap, 
+                       shift(pc.data$MC, i), 
+                       use = "complete.obs"));
+  }
+  
+  cor.table[, 2] <- cor.column;
+}
+
+{
+  cor.column <- NULL;
+  
+  for (i in leads) {
+    cor.column = c(cor.column, 
+                   cor(pc.data$MC, 
+                       shift(pc.data$inflation, i), 
+                       use = "complete.obs"));
+  }
+  
+  cor.table[, 3] <- cor.column;
+}
+
+acf.inflation <- NULL;
+for (i in leads) {
+  acf.inflation = c(acf.inflation, 
+                    cor(pc.data$inflation, 
+                        shift(pc.data$inflation, i), use = "complete.obs"));
+}
+
+barplot(acf.inflation, main = "Correlation Structure\r\nInflation (t), Inflation (t+lead)");
+barplot(cor.table[, 1], main = "Correlation Structure\r\nOutput gap (t), Inflation (t+lead)");
+barplot(cor.table[, 2], main = "Correlation Structure\r\nOutput gap (t), MC (t+lead)");
+barplot(cor.table[, 3], main = "Correlation Structure\r\nMC (t), Inflation (t+lead)");
+
+```
+```{r}
+#---GMM estimation---
+library(gmm);
+
+# Inflation
+g.data <- pc.data[c("inflation")];
+g.data <- cbind(g.data, shift(g.data$inflation, 1));
+
+# Economic activity
+g.data <- cbind(g.data, pc.data$MC);
+
+# Moment conditions - instruments
+g.data <- cbind(g.data, shift(g.data$inflation, -1));
+g.data <- cbind(g.data, shift(g.data$inflation, -2));
+g.data <- cbind(g.data, shift(g.data$inflation, -3));
+g.data <- cbind(g.data, shift(g.data$inflation, -4));
+
+g.data <- cbind(g.data, pc.data$lab.share);
+g.data <- cbind(g.data, pc.data$output.gap);
+
+g.data <- cbind(g.data, pc.data$inflation.other);
+# g.data <- cbind(g.data, shift(pc.data$inflation.other, -1));
+# g.data <- cbind(g.data, shift(pc.data$inflation.other, -2));
+# g.data <- cbind(g.data, shift(pc.data$inflation.other, -3));
+# g.data <- cbind(g.data, shift(pc.data$inflation.other, -4));
+
+# Instrument count
+instr.count <- ncol(g.data) - 3; # first 3 vars are in the NK PC equation
+colnames(g.data) <- c("infl", "f.infl", "activity", 
+                      sapply(1:instr.count, function(i) return(paste0("instr.", i))));
+g.data <- g.data[complete.cases(g.data),];
+
+g <- function(theta, x) {
+  # Errors in the NK PC equation
+  err <- x$infl - theta[1] * x$f.infl - theta[2] * x$activity;
+  
+  # Evaluated moments conditions
+  m <- lapply(1:instr.count, 
+              function(i) return(err * x[[paste0("instr.", i)]]));
+  return(do.call(cbind, m));
+}
+
+Jg <- function(theta, x) {
+  # Jacobian of the moment conditions
+  J <- matrix(c(sapply(1:instr.count, 
+                       function(i) return(c(-mean(x$f.infl * x[[paste0("instr.", i)]]), 
+                                            -mean(x$activity * x[[paste0("instr.", i)]]))))), 
+              nrow = instr.count, ncol = 2, byrow = T);
+  return(J);
+}
+
+pc.model <- gmm(g = g, x = g.data, 
+                t0 = c(beta = 1, kappa = 0), gradv = Jg);
+summary(pc.model);
+confint(pc.model);
+
+pc.model$coefficients[1];
+pc.model$coefficients[2];
+
+# t-stats
+# pc.model$coefficients / sqrt(diag(vcov(pc.model)));
+
+```
+```{r}
+#---Output---
+write.table(pc.model$coefficients, 
+            file = paste0("clipboard-", 2^1), 
+            sep = '\t', col.names = F);
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
