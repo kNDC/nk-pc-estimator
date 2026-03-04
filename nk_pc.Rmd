@@ -147,7 +147,7 @@ library(gmm);
 g.data <- pc.data[c("inflation")];
 g.data <- cbind(g.data, shift(g.data$inflation, 1));
 
-# Economic activity
+# Economic activity indicator
 g.data <- cbind(g.data, pc.data$MC);
 
 # Moment conditions - instruments
@@ -163,13 +163,13 @@ g.data <- cbind(g.data, pc.data$inflation.other);
 
 # Instrument count
 instr.count <- ncol(g.data) - 3; # first 3 vars are in the NK PC equation
-colnames(g.data) <- c("infl", "f.infl", "activity", 
+colnames(g.data) <- c("infl", "infl.e", "activity", 
                       sapply(1:instr.count, function(i) return(paste0("instr.", i))));
 g.data <- g.data[complete.cases(g.data),];
 
 g <- function(theta, x) {
   # Errors in the NK PC equation
-  err <- x$infl - theta[1] * x$f.infl - theta[2] * x$activity;
+  err <- x$infl - theta[1] * x$infl.e - theta[2] * x$activity;
   
   # Evaluated moments conditions
   m <- lapply(1:instr.count, 
@@ -180,19 +180,35 @@ g <- function(theta, x) {
 Jg <- function(theta, x) {
   # Jacobian of the moment conditions
   J <- matrix(c(sapply(1:instr.count, 
-                       function(i) return(c(-mean(x$f.infl * x[[paste0("instr.", i)]]), 
+                       function(i) return(c(-mean(x$infl.e * x[[paste0("instr.", i)]]), 
                                             -mean(x$activity * x[[paste0("instr.", i)]]))))), 
               nrow = instr.count, ncol = 2, byrow = T);
   return(J);
 }
 
-pc.model <- gmm(g = g, x = g.data, 
-                t0 = c(beta = 1, kappa = 0), gradv = Jg);
+pc.model <- gmm(g = g, x = g.data, gradv = Jg, 
+                t0 = c(beta = 1, kappa = 0));
 summary(pc.model);
 confint(pc.model);
 
 pc.model$coefficients[1];
 pc.model$coefficients[2];
+
+cat("\n");
+
+# Cost scale factor in the NK model with Rotemberg pricing
+sigma <- (10 - 1) / pc.model$coefficients[2];
+
+# Price continuation probability in the NK model with Calvo pricing
+theta <- (1 + c(1, 1) %*% pc.model$coefficients) - 
+  sqrt((1 + c(1, 1) %*% pc.model$coefficients) ^ 2 - 4 * pc.model$coefficients[1]);
+theta <- theta / 2 / pc.model$coefficients[1];
+
+cat("Implied parameter values:", 
+    paste0("sigma = ", sprintf("%.2f", sigma)), 
+    paste0("theta = ", sprintf("%.2f", theta)), 
+    paste0("price duration = ", sprintf("%.2f", 3 / (1 - theta))), # x3 to convert from quarters to months
+    sep = '\n');
 
 ```
 ```{r}
